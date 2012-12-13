@@ -117,12 +117,17 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
   if (!output_->Setup())
     return false;
 
+  deps_.reset(new Pipe);
+  if (!deps_->Setup())
+    return false;
+
   pid_ = fork();
   if (pid_ < 0)
     Fatal("fork: %s", strerror(errno));
 
   if (pid_ == 0) {
     output_->CloseRead();
+    deps_->CloseRead();
 
     // Track which fd we use to report errors on.
     int output_pipe = output_->write_fd();
@@ -143,6 +148,7 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
         break;
       close(devnull);
 
+      // Open the output pipe over stdout/stderr.
       if (dup2(output_pipe, 1) < 0 ||
           dup2(output_pipe, 2) < 0) {
         break;
@@ -151,6 +157,12 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
       // Now can use stderr for errors.
       output_pipe = 2;
       output_->CloseWrite();
+
+      // Export the deps pipe fd as an environment variable.
+      char buf[16];
+      sprintf(buf, "%d", deps_->write_fd());
+      if (setenv("NINJA_DEPS", buf, /* overwrite */ 1) < 0)
+        break;
 
       execl("/bin/sh", "/bin/sh", "-c", command.c_str(), (char *) NULL);
     } while (false);
@@ -166,12 +178,13 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
   }
 
   output_->CloseWrite();
+  deps_->CloseWrite();
 
   return true;
 }
 
-void Subprocess::OnPipeReady() {
-  output_->Read();
+void Subprocess::OnPipeReady(Pipe* pipe) {
+  pipe->Read();
 }
 
 ExitStatus Subprocess::Finish() {
@@ -198,6 +211,10 @@ bool Subprocess::Done() const {
 
 const string& Subprocess::GetOutput() const {
   return output_->buf();
+}
+
+const string& Subprocess::GetDepsOutput() const {
+  return deps_->buf();
 }
 
 bool SubprocessSet::interrupted_;
@@ -249,12 +266,15 @@ bool SubprocessSet::DoWork() {
 
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ++i) {
-    int fd = (*i)->output_->read_fd();
-    if (fd < 0)
-      continue;
-    pollfd pfd = { fd, POLLIN | POLLPRI | POLLRDHUP, 0 };
-    fds.push_back(pfd);
-    ++nfds;
+    for (int j = 0; j < 2; ++j) {
+      Subprocess::Pipe* pipe =
+          j == 0 ? (*i)->output_.get() : (*i)->deps_.get();
+      if (pipe->read_fd() < 0)
+        continue;
+      pollfd pfd = { pipe->read_fd(), POLLIN | POLLPRI | POLLRDHUP, 0 };
+      fds.push_back(pfd);
+      ++nfds;
+    }
   }
 
   int ret = ppoll(&fds.front(), nfds, NULL, &old_mask_);
@@ -271,17 +291,19 @@ bool SubprocessSet::DoWork() {
   nfds_t cur_nfd = 0;
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ) {
-    int fd = (*i)->output_->read_fd();
-    if (fd < 0)
-      continue;
-    assert(fd == fds[cur_nfd].fd);
-    if (fds[cur_nfd++].revents) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
+    for (int j = 0; j < 2; ++j) {
+      Subprocess::Pipe* pipe =
+          j == 0 ? (*i)->output_.get() : (*i)->deps_.get();
+      if (pipe->read_fd() < 0)
         continue;
-      }
+      assert(pipe->read_fd() == fds[cur_nfd].fd);
+      if (fds[cur_nfd++].revents)
+        (*i)->OnPipeReady(pipe);
+    }
+    if ((*i)->Done()) {
+      finished_.push(*i);
+      i = running_.erase(i);
+      continue;
     }
     ++i;
   }
@@ -297,11 +319,15 @@ bool SubprocessSet::DoWork() {
 
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ++i) {
-    int fd = (*i)->fd_;
-    if (fd >= 0) {
-      FD_SET(fd, &set);
-      if (nfds < fd+1)
-        nfds = fd+1;
+    for (int j = 0; j < 2; ++j) {
+      Subprocess::Pipe* pipe =
+          j == 0 ? (*i)->output_.get() : (*i)->deps_.get();
+      int fd = pipe->read_fd();
+      if (fd >= 0) {
+        FD_SET(fd, &set);
+        if (nfds < fd+1)
+          nfds = fd+1;
+      }
     }
   }
 
@@ -318,14 +344,17 @@ bool SubprocessSet::DoWork() {
 
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ) {
-    int fd = (*i)->fd_;
-    if (fd >= 0 && FD_ISSET(fd, &set)) {
-      (*i)->OnPipeReady();
-      if ((*i)->Done()) {
-        finished_.push(*i);
-        i = running_.erase(i);
-        continue;
-      }
+    for (int j = 0; j < 2; ++j) {
+      Subprocess::Pipe* pipe =
+          j == 0 ? (*i)->output_.get() : (*i)->deps_.get();
+      int fd = pipe->read_fd();
+      if (fd >= 0 && FD_ISSET(fd, &set))
+        (*i)->OnPipeReady(pipe);
+    }
+    if ((*i)->Done()) {
+      finished_.push(*i);
+      i = running_.erase(i);
+      continue;
     }
     ++i;
   }

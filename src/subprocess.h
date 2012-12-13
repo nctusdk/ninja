@@ -43,15 +43,19 @@ struct Subprocess {
   bool Done() const;
 
   const string& GetOutput() const;
+  const string& GetDepsOutput() const;
 
  private:
+  struct Pipe;
+
   Subprocess();
   bool Start(struct SubprocessSet* set, const string& command);
-  void OnPipeReady();
+  void OnPipeReady(Pipe* pipe);
 
 #ifdef _WIN32
   /// Set up pipe_ as the parent-side pipe of the subprocess; return the
   /// other end of the pipe, usable in the child process.
+  /// TODO: hide some of this in a "Pipe" struct, like on non-Windows.
   HANDLE SetupPipe(HANDLE ioport);
 
   HANDLE child_;
@@ -61,8 +65,8 @@ struct Subprocess {
   bool is_reading_;
   string buf_;
 #else
-  struct Pipe;
   auto_ptr<Pipe> output_;
+  auto_ptr<Pipe> deps_;
   pid_t pid_;
 #endif
 

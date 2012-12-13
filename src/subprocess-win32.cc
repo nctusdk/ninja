@@ -129,7 +129,7 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
   return true;
 }
 
-void Subprocess::OnPipeReady() {
+void Subprocess::OnPipeReady(Pipe* pipe_unused) {
   DWORD bytes;
   if (!GetOverlappedResult(pipe_, &overlapped_, &bytes, TRUE)) {
     if (GetLastError() == ERROR_BROKEN_PIPE) {

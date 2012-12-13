@@ -195,3 +195,19 @@ TEST_F(SubprocessTest, ReadStdin) {
   ASSERT_EQ(1u, subprocs_.finished_.size());
 }
 #endif  // _WIN32
+
+#ifndef _WIN32
+// Write some info to the deps pipe and verify it makes it out.
+TEST_F(SubprocessTest, DepsPipe) {
+  // The shell supports redirecting into arbitrary fds directly;
+  // could use /dev/fd/$NINJA_DEPS too.
+  Subprocess* subproc = subprocs_.Add("echo foo >&$NINJA_DEPS");
+  while (!subproc->Done()) {
+    subprocs_.DoWork();
+  }
+  ASSERT_EQ(ExitSuccess, subproc->Finish());
+  ASSERT_EQ(1u, subprocs_.finished_.size());
+  ASSERT_EQ("", subproc->GetOutput());
+  ASSERT_EQ("foo\n", subproc->GetDepsOutput());
+}
+#endif  // _WIN32
