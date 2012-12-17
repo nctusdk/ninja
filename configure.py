@@ -200,7 +200,7 @@ if platform == 'windows':
         description='CXX $out')
 else:
     n.rule('cxx',
-        command='$cxx -MMD -MT $out -MF $out.d '#/proc/self/fd/$$NINJA_DEPS
+        command='$cxx -MMD -MT $out -MF $out.d '+#/dev/fd/$$NINJA_DEPS '
                 '$cflags -c $in -o $out',
         depfile='$out.d',
         description='CXX $out')
@@ -270,6 +270,7 @@ for name in ['build',
              'build_log',
              'clean',
              'depfile_parser',
+             'deps_log',
              'disk_interface',
              'edit_distance',
              'eval_env',
@@ -348,6 +349,7 @@ for name in ['build_log_test',
              'build_test',
              'clean_test',
              'depfile_parser_test',
+             'deps_log_test',
              'disk_interface_test',
              'edit_distance_test',
              'graph_test',
