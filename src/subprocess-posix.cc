@@ -34,38 +34,98 @@
 
 #include "util.h"
 
-Subprocess::Subprocess() : fd_(-1), pid_(-1) {
+struct Subprocess::Pipe {
+  Pipe() {
+    pipe_[0] = -1;
+    pipe_[1] = -1;
+  }
+  ~Pipe() {
+    CloseRead();
+    CloseWrite();
+  }
+  bool Setup();
+
+  int read_fd() const { return pipe_[0]; }
+  int write_fd() const { return pipe_[1]; }
+  const string& buf() const { return buf_; }
+
+  bool Read();
+
+  bool CloseRead() {
+    return Close(&pipe_[0]);
+  }
+  bool CloseWrite() {
+    return Close(&pipe_[1]);
+  }
+
+ private:
+  bool Close(int* fd);
+
+  int pipe_[2];
+  string buf_;
+};
+
+bool Subprocess::Pipe::Setup() {
+  if (pipe(pipe_) < 0)
+    Fatal("pipe: %s", strerror(errno));
+
+#if !defined(linux)
+  // On Linux we use ppoll; elsewhere we use pselect and so must avoid
+  // overly-large FDs.
+  if (pipe_[0] >= static_cast<int>(FD_SETSIZE)) {
+    Fatal("pipe: %s", strerror(EMFILE));
+  }
+#endif  // !linux
+
+  SetCloseOnExec(pipe_[0]);
+
+  return true;
 }
+
+bool Subprocess::Pipe::Read() {
+  char buf[4 << 10];
+  ssize_t len = read(read_fd(), buf, sizeof(buf));
+  if (len > 0) {
+    buf_.append(buf, len);
+  } else {
+    if (len < 0)
+      Fatal("read: %s", strerror(errno));
+    CloseRead();
+  }
+  return true;
+}
+
+bool Subprocess::Pipe::Close(int* fd) {
+  if (*fd == -1)
+    return true;
+  bool success = close(*fd) == 0;
+  *fd = -1;
+  return success;
+}
+
+Subprocess::Subprocess() : pid_(-1) {
+}
+
 Subprocess::~Subprocess() {
-  if (fd_ >= 0)
-    close(fd_);
   // Reap child if forgotten.
   if (pid_ != -1)
     Finish();
 }
 
 bool Subprocess::Start(SubprocessSet* set, const string& command) {
-  int output_pipe[2];
-  if (pipe(output_pipe) < 0)
-    Fatal("pipe: %s", strerror(errno));
-  fd_ = output_pipe[0];
-#if !defined(linux)
-  // On linux we use ppoll in DoWork(); elsewhere we use pselect and so must
-  // avoid overly-large FDs.
-  if (fd_ >= static_cast<int>(FD_SETSIZE))
-    Fatal("pipe: %s", strerror(EMFILE));
-#endif  // !linux
-  SetCloseOnExec(fd_);
+  output_.reset(new Pipe);
+  if (!output_->Setup())
+    return false;
 
   pid_ = fork();
   if (pid_ < 0)
     Fatal("fork: %s", strerror(errno));
 
   if (pid_ == 0) {
-    close(output_pipe[0]);
+    output_->CloseRead();
 
     // Track which fd we use to report errors on.
-    int error_pipe = output_pipe[1];
+    int output_pipe = output_->write_fd();
     do {
       if (setpgid(0, 0) < 0)
         break;
@@ -83,13 +143,14 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
         break;
       close(devnull);
 
-      if (dup2(output_pipe[1], 1) < 0 ||
-          dup2(output_pipe[1], 2) < 0)
+      if (dup2(output_pipe, 1) < 0 ||
+          dup2(output_pipe, 2) < 0) {
         break;
+      }
 
       // Now can use stderr for errors.
-      error_pipe = 2;
-      close(output_pipe[1]);
+      output_pipe = 2;
+      output_->CloseWrite();
 
       execl("/bin/sh", "/bin/sh", "-c", command.c_str(), (char *) NULL);
     } while (false);
@@ -97,28 +158,20 @@ bool Subprocess::Start(SubprocessSet* set, const string& command) {
     // If we get here, something went wrong; the execl should have
     // replaced us.
     char* err = strerror(errno);
-    if (write(error_pipe, err, strlen(err)) < 0) {
+    if (write(output_pipe, err, strlen(err)) < 0) {
       // If the write fails, there's nothing we can do.
       // But this block seems necessary to silence the warning.
     }
     _exit(1);
   }
 
-  close(output_pipe[1]);
+  output_->CloseWrite();
+
   return true;
 }
 
 void Subprocess::OnPipeReady() {
-  char buf[4 << 10];
-  ssize_t len = read(fd_, buf, sizeof(buf));
-  if (len > 0) {
-    buf_.append(buf, len);
-  } else {
-    if (len < 0)
-      Fatal("read: %s", strerror(errno));
-    close(fd_);
-    fd_ = -1;
-  }
+  output_->Read();
 }
 
 ExitStatus Subprocess::Finish() {
@@ -140,11 +193,11 @@ ExitStatus Subprocess::Finish() {
 }
 
 bool Subprocess::Done() const {
-  return fd_ == -1;
+  return output_->read_fd() == -1;
 }
 
 const string& Subprocess::GetOutput() const {
-  return buf_;
+  return output_->buf();
 }
 
 bool SubprocessSet::interrupted_;
@@ -196,7 +249,7 @@ bool SubprocessSet::DoWork() {
 
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ++i) {
-    int fd = (*i)->fd_;
+    int fd = (*i)->output_->read_fd();
     if (fd < 0)
       continue;
     pollfd pfd = { fd, POLLIN | POLLPRI | POLLRDHUP, 0 };
@@ -218,7 +271,7 @@ bool SubprocessSet::DoWork() {
   nfds_t cur_nfd = 0;
   for (vector<Subprocess*>::iterator i = running_.begin();
        i != running_.end(); ) {
-    int fd = (*i)->fd_;
+    int fd = (*i)->output_->read_fd();
     if (fd < 0)
       continue;
     assert(fd == fds[cur_nfd].fd);

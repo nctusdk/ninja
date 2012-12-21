@@ -15,6 +15,7 @@
 #ifndef NINJA_SUBPROCESS_H_
 #define NINJA_SUBPROCESS_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 #include <queue>
@@ -48,8 +49,6 @@ struct Subprocess {
   bool Start(struct SubprocessSet* set, const string& command);
   void OnPipeReady();
 
-  string buf_;
-
 #ifdef _WIN32
   /// Set up pipe_ as the parent-side pipe of the subprocess; return the
   /// other end of the pipe, usable in the child process.
@@ -60,8 +59,10 @@ struct Subprocess {
   OVERLAPPED overlapped_;
   char overlapped_buf_[4 << 10];
   bool is_reading_;
+  string buf_;
 #else
-  int fd_;
+  struct Pipe;
+  auto_ptr<Pipe> output_;
   pid_t pid_;
 #endif
 
