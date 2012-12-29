@@ -689,7 +689,7 @@ bool Builder::Build(string* err) {
         }
 
         if (edge->is_phony())
-          FinishEdge(edge, true, "");
+          FinishEdge(edge, true, "", "");
         else
           ++pending_commands;
 
@@ -710,7 +710,7 @@ bool Builder::Build(string* err) {
 
       bool success = (result.status == ExitSuccess);
       --pending_commands;
-      FinishEdge(result.edge, success, result.output);
+      FinishEdge(result.edge, success, result.output, result.deps);
       if (!success) {
         if (failures_allowed)
           failures_allowed--;
@@ -772,7 +772,8 @@ bool Builder::StartEdge(Edge* edge, string* err) {
   return true;
 }
 
-void Builder::FinishEdge(Edge* edge, bool success, const string& output) {
+void Builder::FinishEdge(Edge* edge, bool success, const string& output,
+                         const string& deps) {
   METRIC_RECORD("FinishEdge");
   TimeStamp restat_mtime = 0;
 
@@ -828,7 +829,11 @@ void Builder::FinishEdge(Edge* edge, bool success, const string& output) {
 
   int start_time, end_time;
   status_->BuildEdgeFinished(edge, success, output, &start_time, &end_time);
-  if (success && scan_.build_log())
-    scan_.build_log()->RecordCommand(edge, start_time, end_time, restat_mtime);
+  if (success) {
+    if (scan_.build_log()) {
+      scan_.build_log()->RecordCommand(edge, start_time, end_time,
+                                       restat_mtime);
+    }
+  }
 }
 

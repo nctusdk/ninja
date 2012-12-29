@@ -109,7 +109,10 @@ struct CommandRunner {
     Result() : edge(NULL) {}
     Edge* edge;
     ExitStatus status;
+    /// The stdout/stderr of the command.
     string output;
+    /// The dependency output, if any, of the command.
+    string deps;
   };
   /// Wait for a command to complete, or return false if interrupted.
   virtual bool WaitForCommand(Result* result) = 0;
@@ -160,7 +163,8 @@ struct Builder {
   bool Build(string* err);
 
   bool StartEdge(Edge* edge, string* err);
-  void FinishEdge(Edge* edge, bool success, const string& output);
+  void FinishEdge(Edge* edge, bool success,
+                  const string& output, const string& deps);
 
   /// Used for tests.
   void SetBuildLog(BuildLog* log) {
