@@ -715,7 +715,7 @@ bool Builder::Build(string* err) {
       bool success = (result.status == ExitSuccess);
 
       vector<Node*> deps_nodes;
-      if (success) {
+      if (success && !result.deps.empty()) {
         DepfileParser deps;
         string err;
         // Parse the deps output, writing any error into the "output" of the
