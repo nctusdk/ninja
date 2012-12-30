@@ -32,6 +32,8 @@
 #endif
 
 #include "build_log.h"
+#include "depfile_parser.h"
+#include "deps_log.h"
 #include "disk_interface.h"
 #include "graph.h"
 #include "state.h"
@@ -581,6 +583,7 @@ bool RealCommandRunner::WaitForCommand(Result* result) {
 
   result->status = subproc->Finish();
   result->output = subproc->GetOutput();
+  result->deps = subproc->GetDepsOutput();
 
   map<Subprocess*, Edge*>::iterator i = subproc_to_edge_.find(subproc);
   result->edge = i->second;
@@ -690,7 +693,7 @@ bool Builder::Build(string* err) {
         }
 
         if (edge->is_phony())
-          FinishEdge(edge, true, "", "");
+          FinishEdge(edge, true, "", vector<Node*>());
         else
           ++pending_commands;
 
@@ -710,8 +713,32 @@ bool Builder::Build(string* err) {
       }
 
       bool success = (result.status == ExitSuccess);
+
+      vector<Node*> deps_nodes;
+      if (success) {
+        DepfileParser deps;
+        string err;
+        // Parse the deps output, writing any error into the "output" of the
+        // subcommand.
+        success = deps.Parse(&result.deps, &result.output);
+
+        if (success) {
+          // XXX check depfile matches expected output.
+          deps_nodes.reserve(deps.ins_.size());
+          for (vector<StringPiece>::iterator i = deps.ins_.begin();
+               i != deps.ins_.end(); ++i) {
+            if (!CanonicalizePath(const_cast<char*>(i->str_), &i->len_,
+                                  &result.output)) {
+              success = false;
+              break;
+            }
+            deps_nodes.push_back(state_->GetNode(*i));
+          }
+        }
+      }
+
       --pending_commands;
-      FinishEdge(result.edge, success, result.output, result.deps);
+      FinishEdge(result.edge, success, result.output, deps_nodes);
       if (!success) {
         if (failures_allowed)
           failures_allowed--;
@@ -774,7 +801,7 @@ bool Builder::StartEdge(Edge* edge, string* err) {
 }
 
 void Builder::FinishEdge(Edge* edge, bool success, const string& output,
-                         const string& deps) {
+                         const vector<Node*>& deps) {
   METRIC_RECORD("FinishEdge");
   TimeStamp restat_mtime = 0;
 
@@ -834,6 +861,12 @@ void Builder::FinishEdge(Edge* edge, bool success, const string& output,
     if (scan_.build_log()) {
       scan_.build_log()->RecordCommand(edge, start_time, end_time,
                                        restat_mtime);
+    }
+    if (scan_.deps_log()) {
+      // XXX handle multiple outputs.
+      Node* out = edge->outputs_[0];
+      // XXX need to restat to get mtime right.
+      scan_.deps_log()->RecordDeps(out, restat_mtime, deps);
     }
   }
 }

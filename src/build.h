@@ -165,7 +165,7 @@ struct Builder {
 
   bool StartEdge(Edge* edge, string* err);
   void FinishEdge(Edge* edge, bool success,
-                  const string& output, const string& deps);
+                  const string& output, const vector<Node*>& deps);
 
   /// Used for tests.
   void SetBuildLog(BuildLog* log) {
