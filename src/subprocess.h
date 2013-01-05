@@ -43,7 +43,11 @@ struct Subprocess {
   bool Done() const;
 
   const string& GetOutput() const;
+
+#ifndef _WIN32
+  /// Get the output from the separate pipe for implicit dependencies.
   const string& GetDepsOutput() const;
+#endif
 
  private:
   struct Pipe;

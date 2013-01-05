@@ -111,8 +111,10 @@ struct CommandRunner {
     ExitStatus status;
     /// The stdout/stderr of the command.
     string output;
+#ifndef _WIN32
     /// The dependency output, if any, of the command.
     string deps;
+#endif
   };
   /// Wait for a command to complete, or return false if interrupted.
   virtual bool WaitForCommand(Result* result) = 0;

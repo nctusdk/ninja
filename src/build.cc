@@ -583,7 +583,9 @@ bool RealCommandRunner::WaitForCommand(Result* result) {
 
   result->status = subproc->Finish();
   result->output = subproc->GetOutput();
+#ifndef _WIN32
   result->deps = subproc->GetDepsOutput();
+#endif
 
   map<Subprocess*, Edge*>::iterator i = subproc_to_edge_.find(subproc);
   result->edge = i->second;
@@ -715,6 +717,7 @@ bool Builder::Build(string* err) {
       bool success = (result.status == ExitSuccess);
 
       vector<Node*> deps_nodes;
+#ifndef _WIN32
       if (success && !result.deps.empty()) {
         DepfileParser deps;
         string err;
@@ -736,6 +739,7 @@ bool Builder::Build(string* err) {
           }
         }
       }
+#endif
 
       --pending_commands;
       FinishEdge(result.edge, success, result.output, deps_nodes);

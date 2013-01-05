@@ -241,7 +241,7 @@ bool SubprocessSet::DoWork() {
                 // delivered by NotifyInterrupted above.
     return true;
 
-  subproc->OnPipeReady();
+  subproc->OnPipeReady(NULL);
 
   if (subproc->Done()) {
     vector<Subprocess*>::iterator end =
