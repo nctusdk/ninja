@@ -93,19 +93,23 @@ int MSVCHelperMain(int argc, char** argv) {
   CLWrapper cl;
   if (!env.empty())
     cl.SetEnvBlock((void*)env.data());
-  int exit_code = cl.Run(command);
+  string output;
+  int exit_code = cl.Run(command, &output);
 
-  string depfile = string(output_filename) + ".d";
-  FILE* output = fopen(depfile.c_str(), "w");
-  if (!output) {
-    Fatal("opening %s: %s", depfile.c_str(), GetLastErrorString().c_str());
+  CLParser parser;
+  output = parser.Parse(output);
+
+  string depfile_name = string(output_filename) + ".d";
+  FILE* depfile = fopen(depfile_name.c_str(), "w");
+  if (!depfile) {
+    Fatal("opening %s: %s", depfile_name.c_str(), GetLastErrorString().c_str());
   }
-  fprintf(output, "%s: ", output_filename);
-  vector<string> headers = cl.GetEscapedResult();
-  for (vector<string>::iterator i = headers.begin(); i != headers.end(); ++i) {
-    fprintf(output, "%s\n", i->c_str());
+  fprintf(depfile, "%s: ", output_filename);
+  for (set<string>::iterator i = parser.includes_.begin();
+       i != parser.includes_.end(); ++i) {
+    fprintf(depfile, "%s\n", EscapeForDepfile(*i).c_str());
   }
-  fclose(output);
+  fclose(depfile);
 
   return exit_code;
 }
