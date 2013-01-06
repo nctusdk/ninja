@@ -36,6 +36,7 @@
 #include "deps_log.h"
 #include "disk_interface.h"
 #include "graph.h"
+#include "msvc_helper.h"
 #include "state.h"
 #include "subprocess.h"
 #include "util.h"
@@ -857,6 +858,12 @@ void Builder::FinishEdge(Edge* edge, bool success, const string& output,
 bool Builder::ExtractDeps(CommandRunner::Result* result,
                           vector<Node*>* deps_nodes) {
 #ifdef _WIN32
+  CLParser parser;
+  result->output = parser.Parse(result->output);
+  for (set<string>::iterator i = parser.includes_.begin();
+       i != parser.includes_.end(); ++i) {
+    deps_nodes->push_back(state_->GetNode(*i));
+  }
 #else
   if (result.deps.empty())
     return true;
@@ -880,5 +887,5 @@ bool Builder::ExtractDeps(CommandRunner::Result* result,
   }
 #endif
 
-  return deps_nodes;
+  return true;
 }
