@@ -717,29 +717,8 @@ bool Builder::Build(string* err) {
       bool success = (result.status == ExitSuccess);
 
       vector<Node*> deps_nodes;
-#ifndef _WIN32
-      if (success && !result.deps.empty()) {
-        DepfileParser deps;
-        string err;
-        // Parse the deps output, writing any error into the "output" of the
-        // subcommand.
-        success = deps.Parse(&result.deps, &result.output);
-
-        if (success) {
-          // XXX check depfile matches expected output.
-          deps_nodes.reserve(deps.ins_.size());
-          for (vector<StringPiece>::iterator i = deps.ins_.begin();
-               i != deps.ins_.end(); ++i) {
-            if (!CanonicalizePath(const_cast<char*>(i->str_), &i->len_,
-                                  &result.output)) {
-              success = false;
-              break;
-            }
-            deps_nodes.push_back(state_->GetNode(*i));
-          }
-        }
-      }
-#endif
+      if (success)
+        success = ExtractDeps(&result, &deps_nodes);
 
       --pending_commands;
       FinishEdge(result.edge, success, result.output, deps_nodes);
@@ -875,3 +854,31 @@ void Builder::FinishEdge(Edge* edge, bool success, const string& output,
   }
 }
 
+bool Builder::ExtractDeps(CommandRunner::Result* result,
+                          vector<Node*>* deps_nodes) {
+#ifdef _WIN32
+#else
+  if (result.deps.empty())
+    return true;
+
+  DepfileParser deps;
+  string err;
+  // Parse the deps output, writing any error into the "output" of the
+  // subcommand.
+  if (!deps.Parse(&result->deps, &result->output))
+    return false;
+
+  // XXX check depfile matches expected output.
+  deps_nodes.reserve(deps.ins_.size());
+  for (vector<StringPiece>::iterator i = deps.ins_.begin();
+       i != deps.ins_.end(); ++i) {
+    if (!CanonicalizePath(const_cast<char*>(i->str_), &i->len_,
+                          &result.output)) {
+      return false;
+    }
+    deps_nodes->push_back(state_->GetNode(*i));
+  }
+#endif
+
+  return deps_nodes;
+}
